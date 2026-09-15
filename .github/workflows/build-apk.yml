@@ -18,8 +18,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest runners already ship a licensed Android SDK
+      # (ANDROID_HOME / ANDROID_SDK_ROOT are preset). We just make sure
+      # licenses are accepted so Gradle/AGP can auto-download any extra
+      # platform or build-tools version this project needs.
+      - name: Accept Android SDK licenses
+        run: |
+          if command -v sdkmanager >/dev/null 2>&1; then
+            yes | sdkmanager --licenses || true
+          else
+            echo "sdkmanager not on PATH; assuming licenses are already accepted on this runner image."
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -28,6 +37,9 @@ jobs:
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
