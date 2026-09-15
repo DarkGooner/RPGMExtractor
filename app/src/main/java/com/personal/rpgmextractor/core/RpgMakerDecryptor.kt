@@ -55,7 +55,7 @@ object RpgMakerDecryptor {
         output.write(block)
 
         // Everything else is copied verbatim.
-        val buffer = ByteArray(64 * 1024)
+        val buffer = ByteArray(512 * 1024)
         while (true) {
             val read = input.read(buffer)
             if (read <= 0) break

@@ -32,6 +32,19 @@ Extraction runs multiple files concurrently (bounded by a semaphore) using
 buffered streaming I/O, so it stays fast without loading large video files
 fully into memory.
 
+### Performance notes
+`DocumentFile.findFile()` (used to check "does this output file already
+exist?") does a **full directory listing** on every call — calling it once
+per file turns extraction into an O(files²) operation inside any folder
+with many assets (RPG Maker games routinely have hundreds of files in
+`img/pictures`, `img/characters`, etc.), which is what caused very slow
+(30-60+ minute) extractions on larger games. The engine now lists each
+output directory's contents exactly once and caches the result, so existence
+checks are O(1) hash lookups instead of repeated directory scans. Combined
+with a larger I/O buffer (512 KB) and higher default concurrency (8 files
+at once), a ~1.3 GB game should extract in well under a couple of minutes
+rather than tens of minutes.
+
 ## App icon
 A simple original vector logo (adaptive icon, so no bundled image files):
 a folder with an extraction arrow bursting out of it, and three dots for
