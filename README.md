@@ -18,21 +18,39 @@ the extracted assets.
 2. The app scans for image/audio/video assets (encrypted and plain) and
    looks for the `encryptionKey` inside `System.json`.
 3. Pick an output folder.
-4. Tap **Start Extraction** — decrypted/copied files are written to the
-   output folder, preserving the original subfolder structure.
+4. Tap **Start Extraction** — this starts a foreground **background service**
+   that decrypts/copies files into the output folder, preserving the
+   original subfolder structure. You can leave the app, lock the screen, or
+   switch to another app; extraction keeps running.
+5. Progress shows both in-app and as a system **notification with a progress
+   bar** (`N / total` files, updated live). Tapping the notification reopens
+   the app. On Android 13+ you'll be asked once for notification permission
+   the first time you extract — if you decline, extraction still runs, it
+   just won't show a notification.
 
 Extraction runs multiple files concurrently (bounded by a semaphore) using
 buffered streaming I/O, so it stays fast without loading large video files
 fully into memory.
 
+## App icon
+A simple original vector logo (adaptive icon, so no bundled image files):
+a folder with an extraction arrow bursting out of it, and three dots for
+the three asset types (image/audio/video). Defined as vector drawables at
+`app/src/main/res/drawable/ic_launcher_background.xml` and
+`ic_launcher_foreground.xml`, wired up via
+`res/mipmap-anydpi-v26/ic_launcher.xml`, with a flattened single-layer
+fallback at `res/mipmap/ic_launcher.xml` for pre-Android-8 devices.
+
 ## Project structure
 ```
 app/src/main/java/com/personal/rpgmextractor/
-  core/RpgMakerDecryptor.kt   – XOR decrypt + extension mapping
-  core/GameScanner.kt         – walks the folder, finds assets + key
-  core/ExtractionEngine.kt    – concurrent decrypt/copy pipeline
+  core/RpgMakerDecryptor.kt    – XOR decrypt + extension mapping
+  core/GameScanner.kt          – walks the folder, finds assets + key
+  core/ExtractionEngine.kt     – concurrent decrypt/copy pipeline
+  core/ExtractionProgress.kt   – shared progress state (service <-> UI)
+  service/ExtractionService.kt – foreground service + notification progress bar
   viewmodel/ExtractorViewModel.kt
-  ui/ExtractorScreen.kt       – Jetpack Compose Material 3 UI
+  ui/ExtractorScreen.kt        – Jetpack Compose Material 3 UI
   MainActivity.kt
 ```
 

@@ -1,6 +1,8 @@
 package com.personal.rpgmextractor.ui
 
+import android.Manifest
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -28,6 +30,21 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
     val outputFolderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? -> uri?.let { viewModel.onOutputFolderPicked(it) } }
+
+    // Android 13+ requires runtime permission to post the progress notification.
+    // Extraction still runs in the background either way; this just controls whether
+    // the user sees a progress notification for it.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { viewModel.startExtraction() }
+
+    fun beginExtraction() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.startExtraction()
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("RPGM Asset Extractor", fontWeight = FontWeight.Bold) }) }
@@ -87,7 +104,7 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                         keyFound = s.result.encryptionKeyHex != null
                     )
                     Button(
-                        onClick = { viewModel.startExtraction() },
+                        onClick = { beginExtraction() },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = s.result.entries.isNotEmpty()
                     ) {
@@ -102,6 +119,10 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                     LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                     Text("Extracting ${s.done}/${s.total}")
                     Text(s.current, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    Text(
+                        "Running in the background — check the notification shade for progress if you leave the app.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
 
                 is UiState.Finished -> {

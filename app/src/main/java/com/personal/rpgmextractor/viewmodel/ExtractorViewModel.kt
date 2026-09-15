@@ -3,17 +3,18 @@ package com.personal.rpgmextractor.viewmodel
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.personal.rpgmextractor.core.ExtractionEngine
+import com.personal.rpgmextractor.core.ExtractionProgress
+import com.personal.rpgmextractor.core.ExtractionProgressBus
 import com.personal.rpgmextractor.core.GameScanner
-import com.personal.rpgmextractor.core.RpgMakerDecryptor
 import com.personal.rpgmextractor.core.ScanResult
+import com.personal.rpgmextractor.service.ExtractionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -37,6 +38,24 @@ class ExtractorViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     private var scanResult: ScanResult? = null
+
+    init {
+        // Mirrors whatever the background ExtractionService is doing (or already did),
+        // so the UI reconnects correctly even after rotation or reopening the app.
+        viewModelScope.launch {
+            ExtractionProgressBus.state.collect { progress ->
+                when (progress) {
+                    is ExtractionProgress.Idle -> Unit
+                    is ExtractionProgress.Running ->
+                        _state.value = UiState.Extracting(progress.done, progress.total, progress.current)
+                    is ExtractionProgress.Finished ->
+                        _state.value = UiState.Finished(progress.success, progress.total)
+                    is ExtractionProgress.Failed ->
+                        _state.value = UiState.Error(progress.message)
+                }
+            }
+        }
+    }
 
     fun onGameFolderPicked(uri: Uri) {
         val ctx = getApplication<Application>()
@@ -76,38 +95,28 @@ class ExtractorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Starts the background foreground-service extraction. Runs independently of this ViewModel. */
     fun startExtraction() {
-        val result = scanResult ?: return
+        val gameUri = gameFolderUri ?: return
         val outUri = outputFolderUri
         if (outUri == null) {
             _state.value = UiState.Error("Please choose an output folder first")
             return
         }
-        viewModelScope.launch {
-            try {
-                val ctx = getApplication<Application>()
-                val outRoot = DocumentFile.fromTreeUri(ctx, outUri)
-                    ?: return@launch run { _state.value = UiState.Error("Could not open the output folder") }
+        if (scanResult == null) return
 
-                val keyBytes = result.encryptionKeyHex?.let { RpgMakerDecryptor.hexKeyToBytes(it) }
-                _state.value = UiState.Extracting(0, result.entries.size, "")
+        val ctx = getApplication<Application>()
+        _state.value = UiState.Extracting(0, scanResult!!.entries.size, "Starting…")
 
-                val success = ExtractionEngine.extract(
-                    context = ctx,
-                    entries = result.entries,
-                    keyBytes = keyBytes,
-                    outputRoot = outRoot
-                ) { done, total, current ->
-                    _state.update { UiState.Extracting(done, total, current) }
-                }
-                _state.value = UiState.Finished(success, result.entries.size)
-            } catch (e: Exception) {
-                _state.value = UiState.Error(e.message ?: "Extraction failed")
-            }
+        val intent = Intent(ctx, ExtractionService::class.java).apply {
+            putExtra(ExtractionService.EXTRA_GAME_URI, gameUri)
+            putExtra(ExtractionService.EXTRA_OUTPUT_URI, outUri)
         }
+        ContextCompat.startForegroundService(ctx, intent)
     }
 
     fun reset() {
+        ExtractionProgressBus.reset()
         _state.value = UiState.Idle
         gameFolderUri = null
         scanResult = null

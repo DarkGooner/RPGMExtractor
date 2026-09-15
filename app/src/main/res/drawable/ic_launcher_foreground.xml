@@ -1,0 +1,37 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- folder tab -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,46 L50,46 L56,54 L28,54 Z" />
+
+    <!-- folder body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,54 L84,54 L84,84 L24,84 Z" />
+
+    <!-- extraction arrow stem, bursting out of the folder -->
+    <path
+        android:fillColor="#FFD54F"
+        android:pathData="M50,40 L58,40 L58,58 L50,58 Z" />
+
+    <!-- extraction arrow head -->
+    <path
+        android:fillColor="#FFD54F"
+        android:pathData="M54,22 L68,42 L40,42 Z" />
+
+    <!-- asset-type markers: image / audio / video -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M34,64 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="#FF7043"
+        android:pathData="M54,64 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="#29B6F6"
+        android:pathData="M74,64 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+</vector>
