@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -47,13 +49,20 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
     }
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        // We handle system bar insets ourselves below (rather than letting Scaffold
+        // reserve them) so we can guarantee bottom content clears the navigation bar
+        // on 3-button nav devices without double-padding on gesture-nav devices.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { TopAppBar(title = { Text("RPGM Asset Extractor", fontWeight = FontWeight.Bold) }) }
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize(),
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -143,6 +152,10 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                     OutlinedButton(onClick = { viewModel.reset() }) { Text("Try Again") }
                 }
             }
+
+            // Keeps the last element from ever sitting flush against the
+            // navigation bar / gesture handle even on very short screens.
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

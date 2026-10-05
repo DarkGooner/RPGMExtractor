@@ -67,7 +67,7 @@ object ExtractionEngine {
                         }
 
                         if (outDoc != null) {
-                            context.contentResolver.openInputStream(entry.doc.uri)?.use { input ->
+                            context.contentResolver.openInputStream(entry.uri)?.use { input ->
                                 context.contentResolver.openOutputStream(outDoc.uri, "wt")?.use { output ->
                                     if (entry.encrypted && keyBytes != null) {
                                         RpgMakerDecryptor.decryptStream(input, output, keyBytes)

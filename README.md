@@ -45,6 +45,19 @@ with a larger I/O buffer (512 KB) and higher default concurrency (8 files
 at once), a ~1.3 GB game should extract in well under a couple of minutes
 rather than tens of minutes.
 
+Scanning had the same class of bug one level up: `DocumentFile.listFiles()`
+only fetches each child's document ID in bulk - every subsequent `.name` or
+`.isDirectory` call on a child issues its *own* separate query. The scanner
+now queries `DocumentsContract` directly with one batched query per folder
+(ID + name + MIME type for every child in a single call), so walking the
+tree is proportional to the number of *folders*, not files.
+
+Both scanning and extraction run independently of the Activity/ViewModel:
+extraction already runs inside the foreground `ExtractionService` (see
+above), and the now much faster scan step means the brief preview scan
+when you pick a folder no longer needs special background handling to
+stay responsive.
+
 ## App icon
 A simple original vector logo (adaptive icon, so no bundled image files):
 a folder with an extraction arrow bursting out of it, and three dots for
@@ -93,3 +106,7 @@ tab.
 - The debug build is unsigned-for-release but installable directly
   (enable "install unknown apps" for your file manager/browser).
 - minSdk 24 (Android 7.0+), targetSdk 34.
+- The app draws edge-to-edge (`enableEdgeToEdge()`) with explicit
+  navigation-bar inset padding and a scrollable layout, so controls stay
+  fully visible and tappable on both gesture-nav and classic 3-button-nav
+  devices.
