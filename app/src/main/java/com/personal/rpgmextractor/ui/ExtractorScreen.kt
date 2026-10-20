@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.personal.rpgmextractor.core.formatEta
 import com.personal.rpgmextractor.viewmodel.ExtractorViewModel
 import com.personal.rpgmextractor.viewmodel.UiState
 
@@ -142,6 +143,12 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                         if (s.paused) "Paused at ${s.done}/${s.total}"
                         else "Extracting ${s.done}/${s.total} (${(progress * 100).toInt()}%)"
                     )
+                    if (!s.paused && s.total > 0) {
+                        Text(
+                            formatEta(s.etaMs)?.let { "About $it remaining" } ?: "Estimating time remaining…",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                     Text(s.current, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                     PauseStopRow(
                         paused = s.paused,

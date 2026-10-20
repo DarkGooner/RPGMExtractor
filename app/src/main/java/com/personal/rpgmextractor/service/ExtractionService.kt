@@ -15,12 +15,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.personal.rpgmextractor.MainActivity
 import com.personal.rpgmextractor.R
+import com.personal.rpgmextractor.core.EtaEstimator
 import com.personal.rpgmextractor.core.ExtractionControl
 import com.personal.rpgmextractor.core.ExtractionEngine
 import com.personal.rpgmextractor.core.ExtractionProgress
 import com.personal.rpgmextractor.core.ExtractionProgressBus
 import com.personal.rpgmextractor.core.GameScanner
 import com.personal.rpgmextractor.core.RpgMakerDecryptor
+import com.personal.rpgmextractor.core.formatEta
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +45,8 @@ class ExtractionService : Service() {
 
     private var extractionJob: Job? = null
     private val lastPublishMs = AtomicLong(0)
+    private val eta = EtaEstimator()
+    @Volatile private var lastEtaMs = -1L
 
     // Last reported progress, so the notification can be redrawn on pause/resume.
     @Volatile private var lastSuccess = 0
@@ -70,7 +74,12 @@ class ExtractionService : Service() {
         createChannel()
         // Keep the notification's title/buttons in sync however pause was toggled (app or notification).
         scope.launch {
-            gate.paused.collect {
+            gate.paused.collect { paused ->
+                if (paused) {
+                    // Restart the speed window on pause so idle time doesn't inflate the estimate.
+                    eta.reset()
+                    lastEtaMs = -1
+                }
                 if (extractionJob?.isActive == true) {
                     notificationManager.notify(
                         NOTIFICATION_ID,
@@ -110,6 +119,8 @@ class ExtractionService : Service() {
         lastDone = 0
         lastTotal = 0
         lastCurrent = ""
+        lastEtaMs = -1
+        eta.reset()
         val initialNotification = buildProgressNotification(0, 0, "Preparing…")
         ServiceCompat.startForeground(
             this,
@@ -177,7 +188,8 @@ class ExtractionService : Service() {
         val isFinal = total > 0 && done == total
         if (!isFinal && now - last < PUBLISH_INTERVAL_MS) return
         if (!lastPublishMs.compareAndSet(last, now)) return
-        ExtractionProgressBus.update(ExtractionProgress.Running(done, total, current))
+        if (total > 0) lastEtaMs = eta.update(now, done, total)
+        ExtractionProgressBus.update(ExtractionProgress.Running(done, total, current, lastEtaMs))
         notificationManager.notify(NOTIFICATION_ID, buildProgressNotification(done, total, current))
     }
 
@@ -238,6 +250,7 @@ class ExtractionService : Service() {
                     else -> "$done / $total"
                 }
             )
+            .setSubText(if (paused) null else formatEta(lastEtaMs)?.let { "$it left" })
             .setProgress(total.coerceAtLeast(1), done, total == 0 && !paused)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

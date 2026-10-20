@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 sealed class ExtractionProgress {
     object Idle : ExtractionProgress()
-    data class Running(val done: Int, val total: Int, val current: String) : ExtractionProgress()
+    /** [etaMs] is the estimated time remaining, or -1 while it can't be estimated yet. */
+    data class Running(val done: Int, val total: Int, val current: String, val etaMs: Long = -1) : ExtractionProgress()
     data class Finished(val success: Int, val total: Int, val firstError: String? = null) : ExtractionProgress()
     data class Stopped(val success: Int, val done: Int, val total: Int) : ExtractionProgress()
     data class Failed(val message: String) : ExtractionProgress()

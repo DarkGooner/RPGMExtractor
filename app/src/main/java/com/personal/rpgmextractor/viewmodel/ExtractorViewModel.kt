@@ -24,7 +24,13 @@ sealed class UiState {
     object Idle : UiState()
     data class Scanning(val found: Int, val paused: Boolean) : UiState()
     data class Scanned(val result: ScanResult) : UiState()
-    data class Extracting(val done: Int, val total: Int, val current: String, val paused: Boolean) : UiState()
+    data class Extracting(
+        val done: Int,
+        val total: Int,
+        val current: String,
+        val paused: Boolean,
+        val etaMs: Long = -1
+    ) : UiState()
     data class Finished(val success: Int, val total: Int, val firstError: String? = null) : UiState()
     data class Stopped(val success: Int, val done: Int, val total: Int) : UiState()
     data class Error(val message: String) : UiState()
@@ -54,7 +60,7 @@ class ExtractorViewModel(app: Application) : AndroidViewModel(app) {
                 when (progress) {
                     is ExtractionProgress.Idle -> Unit
                     is ExtractionProgress.Running ->
-                        _state.value = UiState.Extracting(progress.done, progress.total, progress.current, paused)
+                        _state.value = UiState.Extracting(progress.done, progress.total, progress.current, paused, progress.etaMs)
                     is ExtractionProgress.Finished ->
                         _state.value = UiState.Finished(progress.success, progress.total, progress.firstError)
                     is ExtractionProgress.Stopped ->
