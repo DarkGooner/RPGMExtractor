@@ -10,36 +10,55 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import androidx.documentfile.provider.DocumentFile
 import com.personal.rpgmextractor.MainActivity
 import com.personal.rpgmextractor.R
+import com.personal.rpgmextractor.core.ExtractionControl
 import com.personal.rpgmextractor.core.ExtractionEngine
 import com.personal.rpgmextractor.core.ExtractionProgress
 import com.personal.rpgmextractor.core.ExtractionProgressBus
 import com.personal.rpgmextractor.core.GameScanner
 import com.personal.rpgmextractor.core.RpgMakerDecryptor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Runs the whole scan + decrypt/copy pipeline as a foreground service so it survives
- * the user leaving the app, and mirrors progress into a notification with a progress bar.
+ * the user leaving the app, and mirrors progress into a notification with a progress bar
+ * plus Pause/Resume and Stop actions.
  */
 class ExtractionService : Service() {
 
-    private val job = Job()
+    private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private lateinit var notificationManager: NotificationManager
+    private val gate = ExtractionControl.gate
+
+    private var extractionJob: Job? = null
+    private val lastPublishMs = AtomicLong(0)
+
+    // Last reported progress, so the notification can be redrawn on pause/resume.
+    @Volatile private var lastSuccess = 0
+    @Volatile private var lastDone = 0
+    @Volatile private var lastTotal = 0
+    @Volatile private var lastCurrent = ""
 
     companion object {
         const val EXTRA_GAME_URI = "extra_game_uri"
         const val EXTRA_OUTPUT_URI = "extra_output_uri"
+        const val ACTION_PAUSE = "com.personal.rpgmextractor.action.PAUSE"
+        const val ACTION_RESUME = "com.personal.rpgmextractor.action.RESUME"
+        const val ACTION_STOP = "com.personal.rpgmextractor.action.STOP"
         const val CHANNEL_ID = "extraction_channel"
         const val NOTIFICATION_ID = 1001
+        private const val PUBLISH_INTERVAL_MS = 150L
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -48,9 +67,34 @@ class ExtractionService : Service() {
         super.onCreate()
         notificationManager = getSystemService(NotificationManager::class.java)
         createChannel()
+        // Keep the notification's title/buttons in sync however pause was toggled (app or notification).
+        scope.launch {
+            gate.paused.collect {
+                if (extractionJob?.isActive == true) {
+                    notificationManager.notify(
+                        NOTIFICATION_ID,
+                        buildProgressNotification(lastDone, lastTotal, lastCurrent)
+                    )
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PAUSE -> { gate.pause(); stopIfIdle(); return START_NOT_STICKY }
+            ACTION_RESUME -> { gate.resume(); stopIfIdle(); return START_NOT_STICKY }
+            ACTION_STOP -> {
+                extractionJob?.cancel()
+                gate.resume() // don't leave the next run paused
+                stopIfIdle()
+                return START_NOT_STICKY
+            }
+        }
+
+        // Already extracting: ignore a duplicate start request.
+        if (extractionJob?.isActive == true) return START_NOT_STICKY
+
         val gameUri = intent?.getUriExtraCompat(EXTRA_GAME_URI)
         val outputUri = intent?.getUriExtraCompat(EXTRA_OUTPUT_URI)
 
@@ -59,7 +103,12 @@ class ExtractionService : Service() {
             return START_NOT_STICKY
         }
 
-        val initialNotification = buildProgressNotification(0, 1, "Scanning game folder…")
+        gate.resume()
+        lastSuccess = 0
+        lastDone = 0
+        lastTotal = 0
+        lastCurrent = ""
+        val initialNotification = buildProgressNotification(0, 0, "Preparing…")
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
@@ -67,54 +116,69 @@ class ExtractionService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         )
 
-        scope.launch {
+        extractionJob = scope.launch {
             try {
-                val root = DocumentFile.fromTreeUri(this@ExtractionService, gameUri)
-                val outRoot = DocumentFile.fromTreeUri(this@ExtractionService, outputUri)
-                if (root == null || outRoot == null) {
-                    fail("Could not open the selected folders")
-                    return@launch
-                }
-
-                val result = GameScanner.scan(this@ExtractionService, root)
+                // Reuse the scan the UI already did; only rescan if it's gone (process death) or stale.
+                val result = ExtractionControl.lastScan?.takeIf { it.first == gameUri }?.second
+                    ?: GameScanner.scan(this@ExtractionService, gameUri, gate) { found ->
+                        publishProgress(0, 0, 0, "Scanning… $found assets found")
+                    }
                 val keyBytes = result.encryptionKeyHex?.let { RpgMakerDecryptor.hexKeyToBytes(it) }
-                val total = result.entries.size
-
-                if (total == 0) {
+                if (result.entries.isEmpty()) {
                     ExtractionProgressBus.update(ExtractionProgress.Finished(0, 0))
                     notificationManager.notify(NOTIFICATION_ID, buildDoneNotification(0, 0))
                     return@launch
                 }
 
-                var lastNotifyMs = 0L
                 val success = ExtractionEngine.extract(
                     context = this@ExtractionService,
                     entries = result.entries,
                     keyBytes = keyBytes,
-                    outputRoot = outRoot
-                ) { done, totalCount, current ->
-                    ExtractionProgressBus.update(ExtractionProgress.Running(done, totalCount, current))
-                    val now = System.currentTimeMillis()
-                    if (now - lastNotifyMs > 150 || done == totalCount) {
-                        lastNotifyMs = now
-                        notificationManager.notify(
-                            NOTIFICATION_ID,
-                            buildProgressNotification(done, totalCount, current)
-                        )
-                    }
+                    outputTreeUri = outputUri,
+                    gate = gate
+                ) { ok, done, totalCount, current ->
+                    publishProgress(ok, done, totalCount, current)
                 }
 
-                ExtractionProgressBus.update(ExtractionProgress.Finished(success, total))
-                notificationManager.notify(NOTIFICATION_ID, buildDoneNotification(success, total))
+                // lastTotal is the de-duplicated count the engine actually worked through.
+                ExtractionProgressBus.update(ExtractionProgress.Finished(success, lastTotal))
+                notificationManager.notify(NOTIFICATION_ID, buildDoneNotification(success, lastTotal))
+            } catch (e: CancellationException) {
+                ExtractionProgressBus.update(ExtractionProgress.Stopped(lastSuccess, lastDone, lastTotal))
+                notificationManager.notify(NOTIFICATION_ID, buildStoppedNotification(lastDone, lastTotal))
             } catch (e: Exception) {
                 fail(e.message ?: "Extraction failed")
             } finally {
+                gate.resume()
                 ServiceCompat.stopForeground(this@ExtractionService, ServiceCompat.STOP_FOREGROUND_DETACH)
                 stopSelf()
             }
         }
 
         return START_NOT_STICKY
+    }
+
+    /**
+     * Called from many worker threads at once. Pushing every single file to the UI and
+     * notification would flood both (and Android drops notification updates beyond a few
+     * per second anyway), so updates are rate limited.
+     */
+    private fun publishProgress(success: Int, done: Int, total: Int, current: String) {
+        lastSuccess = success
+        lastDone = done
+        lastTotal = total
+        lastCurrent = current
+        val now = SystemClock.elapsedRealtime()
+        val last = lastPublishMs.get()
+        val isFinal = total > 0 && done == total
+        if (!isFinal && now - last < PUBLISH_INTERVAL_MS) return
+        if (!lastPublishMs.compareAndSet(last, now)) return
+        ExtractionProgressBus.update(ExtractionProgress.Running(done, total, current))
+        notificationManager.notify(NOTIFICATION_ID, buildProgressNotification(done, total, current))
+    }
+
+    private fun stopIfIdle() {
+        if (extractionJob?.isActive != true) stopSelf()
     }
 
     private fun fail(message: String) {
@@ -150,17 +214,49 @@ class ExtractionService : Service() {
         )
     }
 
+    private fun actionIntent(action: String, requestCode: Int): PendingIntent =
+        PendingIntent.getService(
+            this, requestCode,
+            Intent(this, ExtractionService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
     private fun buildProgressNotification(done: Int, total: Int, current: String): Notification {
         val shortName = current.substringAfterLast('/')
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val paused = gate.paused.value
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Extracting assets…")
-            .setContentText(if (shortName.isNotEmpty()) "$done / $total  •  $shortName" else "$done / $total")
-            .setProgress(total.coerceAtLeast(1), done, false)
+            .setContentTitle(if (paused) "Extraction paused" else "Extracting assets…")
+            .setContentText(
+                when {
+                    total == 0 -> shortName
+                    shortName.isNotEmpty() -> "$done / $total  •  $shortName"
+                    else -> "$done / $total"
+                }
+            )
+            .setProgress(total.coerceAtLeast(1), done, total == 0 && !paused)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent())
             .setPriority(NotificationCompat.PRIORITY_LOW)
+        if (paused) {
+            builder.addAction(0, "Resume", actionIntent(ACTION_RESUME, 1))
+        } else {
+            builder.addAction(0, "Pause", actionIntent(ACTION_PAUSE, 2))
+        }
+        builder.addAction(0, "Stop", actionIntent(ACTION_STOP, 3))
+        return builder.build()
+    }
+
+    private fun buildStoppedNotification(done: Int, total: Int): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Extraction stopped")
+            .setContentText("$done / $total assets processed")
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent())
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
     }
 

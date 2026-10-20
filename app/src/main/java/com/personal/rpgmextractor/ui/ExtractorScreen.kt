@@ -101,8 +101,18 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                 }
 
                 is UiState.Scanning -> {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    Text("Scanning game files…")
+                    if (s.paused) {
+                        LinearProgressIndicator(progress = { 0f }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    Text(if (s.paused) "Scan paused — ${s.found} assets found" else "Scanning game files… ${s.found} assets found")
+                    PauseStopRow(
+                        paused = s.paused,
+                        onPause = viewModel::pauseScan,
+                        onResume = viewModel::resumeScan,
+                        onStop = viewModel::stopScan
+                    )
                 }
 
                 is UiState.Scanned -> {
@@ -126,12 +136,41 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                 is UiState.Extracting -> {
                     val progress = if (s.total > 0) s.done / s.total.toFloat() else 0f
                     LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                    Text("Extracting ${s.done}/${s.total}")
+                    Text(
+                        if (s.paused) "Paused at ${s.done}/${s.total}"
+                        else "Extracting ${s.done}/${s.total} (${(progress * 100).toInt()}%)"
+                    )
                     Text(s.current, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    PauseStopRow(
+                        paused = s.paused,
+                        onPause = viewModel::pauseExtraction,
+                        onResume = viewModel::resumeExtraction,
+                        onStop = viewModel::stopExtraction
+                    )
                     Text(
                         "Running in the background — check the notification shade for progress if you leave the app.",
                         style = MaterialTheme.typography.bodySmall
                     )
+                }
+
+                is UiState.Stopped -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Stop, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Extraction stopped at ${s.done}/${s.total} (${s.success} extracted).")
+                    }
+                    if (viewModel.canContinue()) {
+                        Button(onClick = { beginExtraction() }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Continue Extraction")
+                        }
+                        Text(
+                            "Files that were already extracted are skipped.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    OutlinedButton(onClick = { viewModel.reset() }) { Text("Start Over") }
                 }
 
                 is UiState.Finished -> {
@@ -156,6 +195,33 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
             // Keeps the last element from ever sitting flush against the
             // navigation bar / gesture handle even on very short screens.
             Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun PauseStopRow(paused: Boolean, onPause: () -> Unit, onResume: () -> Unit, onStop: () -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (paused) {
+            FilledTonalButton(onClick = onResume) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Resume")
+            }
+        } else {
+            FilledTonalButton(onClick = onPause) {
+                Icon(Icons.Default.Pause, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Pause")
+            }
+        }
+        OutlinedButton(
+            onClick = onStop,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+        ) {
+            Icon(Icons.Default.Stop, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Stop")
         }
     }
 }

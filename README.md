@@ -27,8 +27,12 @@ the extracted assets.
    the app. On Android 13+ you'll be asked once for notification permission
    the first time you extract — if you decline, extraction still runs, it
    just won't show a notification.
+6. **Pause / Resume / Stop** are available both in the app and as buttons on
+   the notification, for scanning as well as extraction. After **Stop**,
+   **Continue Extraction** resumes the job: files that were already fully
+   extracted (detected by size) are skipped rather than rewritten.
 
-Extraction runs multiple files concurrently (bounded by a semaphore) using
+Extraction runs a fixed pool of worker coroutines (12 by default) using
 buffered streaming I/O, so it stays fast without loading large video files
 fully into memory.
 
@@ -51,6 +55,26 @@ only fetches each child's document ID in bulk - every subsequent `.name` or
 now queries `DocumentsContract` directly with one batched query per folder
 (ID + name + MIME type for every child in a single call), so walking the
 tree is proportional to the number of *folders*, not files.
+
+For very large games (tens of thousands of assets) a few more things matter:
+
+- **No double scan.** The scan done when you pick the folder is handed to
+  the extraction service instead of the service walking the whole game again.
+- **Parallel scanning.** Sibling folders are listed concurrently (up to 8
+  queries in flight), since scan time is almost entirely provider latency.
+- **No global lock on file creation.** All output folders are created first;
+  after that, workers create their output files fully in parallel. Before,
+  every `createFile()` call (the most expensive SAF operation) was serialised
+  behind a single mutex, so "8 concurrent workers" really created one file
+  at a time.
+- **Batched output listing.** Existing output contents are read with the
+  same one-query-per-folder approach as the scanner (no per-file `.name`
+  calls), which also makes resuming a stopped run cheap.
+- **Fixed worker pool, reused buffers.** A fixed set of workers pulls from a
+  shared index instead of creating one coroutine per asset, and each worker
+  reuses one copy buffer, which avoids tens of thousands of 512 KB allocations.
+- **Throttled progress.** UI/notification updates are rate limited instead of
+  being pushed once per file from every worker thread.
 
 Both scanning and extraction run independently of the Activity/ViewModel:
 extraction already runs inside the foreground `ExtractionService` (see

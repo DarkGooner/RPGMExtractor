@@ -38,8 +38,9 @@ object RpgMakerDecryptor {
     /**
      * Reads an encrypted asset from [input] and writes the decrypted,
      * playable/viewable file to [output]. Returns true on success.
+     * [buffer] is supplied by the caller so it can be reused across files.
      */
-    fun decryptStream(input: InputStream, output: OutputStream, key: ByteArray): Boolean {
+    fun decryptStream(input: InputStream, output: OutputStream, key: ByteArray, buffer: ByteArray): Boolean {
         if (key.isEmpty()) return false
 
         // Skip the 16 byte fixed signature/header.
@@ -55,14 +56,18 @@ object RpgMakerDecryptor {
         output.write(block)
 
         // Everything else is copied verbatim.
-        val buffer = ByteArray(512 * 1024)
+        copy(input, output, buffer)
+        return true
+    }
+
+    /** Plain stream copy using a caller-owned buffer (avoids a fresh allocation per file). */
+    fun copy(input: InputStream, output: OutputStream, buffer: ByteArray) {
         while (true) {
             val read = input.read(buffer)
-            if (read <= 0) break
+            if (read < 0) break
             output.write(buffer, 0, read)
         }
         output.flush()
-        return true
     }
 
     private fun readFully(input: InputStream, buf: ByteArray): Int {
