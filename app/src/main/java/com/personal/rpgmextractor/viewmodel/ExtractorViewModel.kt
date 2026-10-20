@@ -25,7 +25,7 @@ sealed class UiState {
     data class Scanning(val found: Int, val paused: Boolean) : UiState()
     data class Scanned(val result: ScanResult) : UiState()
     data class Extracting(val done: Int, val total: Int, val current: String, val paused: Boolean) : UiState()
-    data class Finished(val success: Int, val total: Int) : UiState()
+    data class Finished(val success: Int, val total: Int, val firstError: String? = null) : UiState()
     data class Stopped(val success: Int, val done: Int, val total: Int) : UiState()
     data class Error(val message: String) : UiState()
 }
@@ -56,7 +56,7 @@ class ExtractorViewModel(app: Application) : AndroidViewModel(app) {
                     is ExtractionProgress.Running ->
                         _state.value = UiState.Extracting(progress.done, progress.total, progress.current, paused)
                     is ExtractionProgress.Finished ->
-                        _state.value = UiState.Finished(progress.success, progress.total)
+                        _state.value = UiState.Finished(progress.success, progress.total, progress.firstError)
                     is ExtractionProgress.Stopped ->
                         _state.value = UiState.Stopped(progress.success, progress.done, progress.total)
                     is ExtractionProgress.Failed ->
@@ -129,8 +129,12 @@ class ExtractorViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = UiState.Idle
     }
 
-    /** Starts the background foreground-service extraction. Runs independently of this ViewModel. */
-    fun startExtraction() {
+    /**
+     * Starts the background foreground-service extraction. Runs independently of this ViewModel.
+     * [resume] skips outputs that already look complete (used by "Continue" after Stop);
+     * a fresh start always overwrites, so bad output from an earlier run gets replaced.
+     */
+    fun startExtraction(resume: Boolean = false) {
         val gameUri = gameFolderUri ?: return
         val outUri = outputFolderUri
         if (outUri == null) {
@@ -145,6 +149,7 @@ class ExtractorViewModel(app: Application) : AndroidViewModel(app) {
         val intent = Intent(ctx, ExtractionService::class.java).apply {
             putExtra(ExtractionService.EXTRA_GAME_URI, gameUri)
             putExtra(ExtractionService.EXTRA_OUTPUT_URI, outUri)
+            putExtra(ExtractionService.EXTRA_RESUME, resume)
         }
         ContextCompat.startForegroundService(ctx, intent)
     }

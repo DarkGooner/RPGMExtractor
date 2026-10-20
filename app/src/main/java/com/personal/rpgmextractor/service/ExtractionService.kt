@@ -53,6 +53,7 @@ class ExtractionService : Service() {
     companion object {
         const val EXTRA_GAME_URI = "extra_game_uri"
         const val EXTRA_OUTPUT_URI = "extra_output_uri"
+        const val EXTRA_RESUME = "extra_resume"
         const val ACTION_PAUSE = "com.personal.rpgmextractor.action.PAUSE"
         const val ACTION_RESUME = "com.personal.rpgmextractor.action.RESUME"
         const val ACTION_STOP = "com.personal.rpgmextractor.action.STOP"
@@ -97,6 +98,7 @@ class ExtractionService : Service() {
 
         val gameUri = intent?.getUriExtraCompat(EXTRA_GAME_URI)
         val outputUri = intent?.getUriExtraCompat(EXTRA_OUTPUT_URI)
+        val resume = intent?.getBooleanExtra(EXTRA_RESUME, false) ?: false
 
         if (gameUri == null || outputUri == null) {
             stopSelf()
@@ -130,19 +132,21 @@ class ExtractionService : Service() {
                     return@launch
                 }
 
-                val success = ExtractionEngine.extract(
+                val outcome = ExtractionEngine.extract(
                     context = this@ExtractionService,
                     entries = result.entries,
                     keyBytes = keyBytes,
                     outputTreeUri = outputUri,
-                    gate = gate
+                    gate = gate,
+                    skipCompleted = resume
                 ) { ok, done, totalCount, current ->
                     publishProgress(ok, done, totalCount, current)
                 }
 
-                // lastTotal is the de-duplicated count the engine actually worked through.
-                ExtractionProgressBus.update(ExtractionProgress.Finished(success, lastTotal))
-                notificationManager.notify(NOTIFICATION_ID, buildDoneNotification(success, lastTotal))
+                ExtractionProgressBus.update(
+                    ExtractionProgress.Finished(outcome.success, outcome.total, outcome.firstError)
+                )
+                notificationManager.notify(NOTIFICATION_ID, buildDoneNotification(outcome.success, outcome.total))
             } catch (e: CancellationException) {
                 ExtractionProgressBus.update(ExtractionProgress.Stopped(lastSuccess, lastDone, lastTotal))
                 notificationManager.notify(NOTIFICATION_ID, buildStoppedNotification(lastDone, lastTotal))

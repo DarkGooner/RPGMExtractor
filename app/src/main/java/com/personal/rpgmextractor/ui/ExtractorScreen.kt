@@ -36,15 +36,17 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
     // Android 13+ requires runtime permission to post the progress notification.
     // Extraction still runs in the background either way; this just controls whether
     // the user sees a progress notification for it.
+    var resumeRequested by remember { mutableStateOf(false) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { viewModel.startExtraction() }
+    ) { viewModel.startExtraction(resume = resumeRequested) }
 
-    fun beginExtraction() {
+    fun beginExtraction(resume: Boolean = false) {
+        resumeRequested = resume
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            viewModel.startExtraction()
+            viewModel.startExtraction(resume)
         }
     }
 
@@ -160,7 +162,7 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                         Text("Extraction stopped at ${s.done}/${s.total} (${s.success} extracted).")
                     }
                     if (viewModel.canContinue()) {
-                        Button(onClick = { beginExtraction() }, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = { beginExtraction(resume = true) }, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                             Text("Continue Extraction")
@@ -178,6 +180,13 @@ fun ExtractorScreen(viewModel: ExtractorViewModel) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
                         Text("Extraction complete: ${s.success}/${s.total} assets extracted.")
+                    }
+                    if (s.firstError != null) {
+                        Text(
+                            "${s.total - s.success} failed. First error: ${s.firstError}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
                     OutlinedButton(onClick = { viewModel.reset() }) { Text("Start Over") }
                 }
